@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrisisGrid — Disaster Routing Engine</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* ── Reset & Variables ────────────────────────────────── */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-deep:    #060a13;
+            --bg-primary: #0b1120;
+            --bg-card:    #131c2e;
+            --bg-hover:   #1a253a;
+            --border:     #1e2d45;
+            --text:       #e2e8f0;
+            --text-sec:   #8899b0;
+            --text-muted: #556677;
+            --cyan:       #06d6e0;
+            --blue:       #3b82f6;
+            --green:      #22c55e;
+            --red:        #ef4444;
+            --amber:      #f59e0b;
+            --orange:     #f97316;
+            --purple:     #8b5cf6;
+            --sidebar-w:  360px;
+            --radius:     10px;
+        }
+
+        html, body { height: 100%; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg-deep); color: var(--text); overflow: hidden; }
+
+        /* ── Layout ──────────────────────────────────────────── */
+        .app { display: flex; height: 100vh; }
+        #sidebar { width: var(--sidebar-w); min-width: var(--sidebar-w); background: var(--bg-primary); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 1000; }
+        #map { flex: 1; }
+
+        /* ── Sidebar Header ──────────────────────────────────── */
+        .sidebar-header { padding: 18px 20px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, #0d1528 0%, #111d33 100%); }
+        .sidebar-header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; display: flex; align-items: center; gap: 10px; }
+        .sidebar-header h1 .logo { width: 28px; height: 28px; background: linear-gradient(135deg, var(--cyan), var(--blue)); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 900; color: #fff; }
+        .sidebar-header .subtitle { font-size: 11px; color: var(--text-muted); margin-top: 4px; letter-spacing: 1.5px; text-transform: uppercase; }
+
+        /* ── Sidebar Content ─────────────────────────────────── */
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+        .sidebar-content::-webkit-scrollbar { width: 5px; }
+        .sidebar-content::-webkit-scrollbar-track { background: transparent; }
+        .sidebar-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        /* ── Cards ────────────────────────────────────────────── */
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+        .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .card-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-sec); }
+        .card-icon { font-size: 14px; }
+
+        /* ── Route Controls ──────────────────────────────────── */
+        .route-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .route-row label { font-size: 11px; color: var(--text-muted); min-width: 18px; font-weight: 600; }
+        .route-row select { flex: 1; background: var(--bg-deep); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 12px; cursor: pointer; outline: none; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238899b0' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+        .route-row select:focus { border-color: var(--cyan); }
+        .btn { width: 100%; padding: 9px; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; letter-spacing: 0.5px; }
+        .btn-primary { background: linear-gradient(135deg, var(--cyan), var(--blue)); color: #fff; }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-secondary { background: var(--bg-deep); color: var(--text-sec); border: 1px solid var(--border); }
+        .btn-secondary:hover { border-color: var(--text-muted); color: var(--text); }
+        .swap-btn { background: var(--bg-deep); border: 1px solid var(--border); color: var(--text-sec); width: 28px; height: 28px; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: 0.2s; flex-shrink: 0; }
+        .swap-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+        /* ── Route Status ────────────────────────────────────── */
+        .path-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 12px; }
+        .path-node { background: var(--bg-deep); border: 1px solid var(--border); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: 'Consolas', monospace; }
+        .path-node.damaged { border-color: var(--red); color: var(--red); background: rgba(239,68,68,0.1); }
+        .path-arrow { color: var(--text-muted); font-size: 11px; }
+        .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(30,45,69,0.6); font-size: 12px; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: var(--text-sec); }
+        .stat-value { font-weight: 600; font-family: 'Consolas', monospace; }
+        .stat-value.accent { color: var(--cyan); }
+        .no-route { color: var(--text-muted); font-style: italic; font-size: 12px; text-align: center; padding: 10px 0; }
+        .error-msg { color: var(--red); font-size: 12px; text-align: center; padding: 10px 0; }
+        .alt-routes-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+        .alt-routes-section h4 { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--amber); margin-bottom: 6px; }
+        .alt-route { display: flex; justify-content: space-between; font-size: 11px; padding: 4px 0; color: var(--text-sec); }
+        .alt-path { font-family: 'Consolas', monospace; }
+        .alt-cost { color: var(--amber); font-weight: 600; }
+
+        /* ── Network Health ──────────────────────────────────── */
+        .health-bar { width: 100%; height: 8px; background: var(--bg-deep); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+        .health-bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease, background 0.6s ease; }
+        .health-header { display: flex; justify-content: space-between; align-items: baseline; }
+        .health-score { font-size: 22px; font-weight: 700; font-family: 'Consolas', monospace; }
+        .health-details { font-size: 11px; color: var(--text-sec); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 12px; }
+        .health-stat { display: flex; align-items: center; gap: 5px; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+        .dot.green { background: var(--green); }
+        .dot.red { background: var(--red); }
+        .damaged-list { color: var(--red); font-family: 'Consolas', monospace; margin-top: 4px; display: block; font-size: 11px; }
+
+        /* ── Simulation Panel ────────────────────────────────── */
+        .sim-header { display: flex; align-items: center; justify-content: space-between; }
+        .toggle { position: relative; display: inline-block; width: 38px; height: 20px; flex-shrink: 0; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle .slider { position: absolute; cursor: pointer; inset: 0; background: #334155; border-radius: 20px; transition: 0.3s; }
+        .toggle .slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
+        .toggle input:checked + .slider { background: var(--cyan); }
+        .toggle input:checked + .slider::before { transform: translateX(18px); }
+        .sim-controls { display: none; margin-top: 12px; }
+        .sim-controls.active { display: block; }
+        .sim-row { margin-bottom: 10px; }
+        .sim-row label { font-size: 11px; color: var(--text-sec); display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .sim-row input[type=range] { width: 100%; accent-color: var(--cyan); cursor: pointer; }
+        .sim-hint { font-size: 10px; color: var(--text-muted); font-style: italic; margin-bottom: 8px; padding: 6px 8px; background: rgba(6,214,224,0.05); border-radius: 5px; border-left: 2px solid var(--cyan); }
+        .sim-list { max-height: 100px; overflow-y: auto; margin-bottom: 8px; }
+        .sim-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 11px; }
+        .sim-item .remove-sim { background: none; border: none; color: var(--red); cursor: pointer; font-size: 14px; margin-left: auto; padding: 0 4px; }
+
+        /* ── Earthquake Feed ──────────────────────────────────── */
+        .quake-list { max-height: 230px; overflow-y: auto; }
+        .quake-list::-webkit-scrollbar { width: 4px; }
+        .quake-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        .quake-item { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 6px; cursor: pointer; transition: background 0.15s; }
+        .quake-item:hover { background: var(--bg-hover); }
+        .quake-mag { min-width: 44px; text-align: center; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: 'Consolas', monospace; flex-shrink: 0; }
+        .quake-mag.high { background: rgba(239,68,68,0.2); color: var(--red); }
+        .quake-mag.medium { background: rgba(245,158,11,0.2); color: var(--amber); }
+        .quake-mag.low { background: rgba(34,197,94,0.15); color: var(--green); }
+        .quake-info { display: flex; flex-direction: column; overflow: hidden; }
+        .quake-place { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .quake-time { font-size: 10px; color: var(--text-muted); }
+        .feed-empty { font-size: 11px; color: var(--text-muted); text-align: center; padding: 16px 0; font-style: italic; }
+
+        /* ── Sidebar Footer ──────────────────────────────────── */
+        .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
+        .refresh-label { display: flex; align-items: center; gap: 8px; }
+
+        /* ── Map Markers ─────────────────────────────────────── */
+        .node-marker { position: relative; display: flex; flex-direction: column; align-items: center; pointer-events: auto; }
+        .pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid #fff; box-shadow: 0 0 8px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.2); transition: transform 0.2s; }
+        .node-marker:hover .pin-dot { transform: scale(1.2); }
+        .pin-label { font-size: 10px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,0.5); margin-top: 3px; letter-spacing: 0.5px; white-space: nowrap; }
+        .pulse-ring { position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; margin-top: -11px; margin-left: -8px; border-radius: 50%; border: 2px solid var(--red); animation: pulse-anim 2s ease-out infinite; pointer-events: none; }
+        @keyframes pulse-anim {
+            0%   { transform: scale(1); opacity: 1; }
+            70%  { transform: scale(3); opacity: 0; }
+            100% { transform: scale(3); opacity: 0; }
+        }
+
+        /* ── Leaflet Overrides ────────────────────────────────── */
+        .leaflet-popup-content-wrapper { background: var(--bg-card); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 30px rgba(0,0,0,0.6); }
+        .leaflet-popup-tip { background: var(--bg-card); border: 1px solid var(--border); }
+        .leaflet-popup-close-button { color: var(--text-sec) !important; font-size: 18px !important; }
+        .leaflet-popup-content { font-size: 12px; line-height: 1.5; }
+        .leaflet-popup-content b { color: var(--cyan); }
+        .leaflet-popup-content hr { border: none; border-top: 1px solid var(--border); margin: 6px 0; }
+        .leaflet-popup-content ul { padding-left: 16px; margin-top: 4px; }
+        .leaflet-popup-content li { font-size: 11px; color: var(--text-sec); }
+        .leaflet-control-zoom a { background: var(--bg-card) !important; color: var(--text) !important; border-color: var(--border) !important; }
+        .leaflet-control-zoom a:hover { background: var(--bg-hover) !important; }
+        .leaflet-tooltip { background: var(--bg-card); color: var(--text); border: 1px solid var(--border); border-radius: 5px; font-size: 11px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); padding: 4px 8px; }
+        .leaflet-tooltip-top::before { border-top-color: var(--bg-card); }
+        .leaflet-tooltip-bottom::before { border-bottom-color: var(--bg-card); }
+
+        /* ── Map Legend ───────────────────────────────────────── */
+        .legend { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 11px; color: var(--text-sec); line-height: 1.8; box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+        .legend-title { font-weight: 600; color: var(--text); font-size: 11px; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
+        .legend-item { display: flex; align-items: center; gap: 7px; }
+        .legend-swatch { width: 18px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; flex-shrink: 0; }
+        .legend-circle { width: 14px; height: 14px; border-radius: 50%; border: 1.5px dashed; flex-shrink: 0; }
+
+        /* ── Loading Overlay ──────────────────────────────────── */
+        .loading { position: absolute; top: 0; left: var(--sidebar-w); right: 0; bottom: 0; background: rgba(6,10,19,0.7); z-index: 999; display: none; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
+        .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- ═══ Sidebar ═══ -->
+        <div id="sidebar">
+            <div class="sidebar-header">
+                <h1><span class="logo">CG</span> CrisisGrid</h1>
+                <div class="subtitle">Infrastructure Disaster Routing Engine</div>
+            </div>
+
+            <div class="sidebar-content">
+                <!-- Route Controls -->
+                <div class="card">
+                    <div class="card-head">
+                        <span class="card-title">Route Planner</span>
+                        <span class="card-icon">🗺️</span>
+                    </div>
+                    <div class="route-row">
+                        <label>A</label>
+                        <select id="source-select">
+                            <option value="SEA" selected>SEA — Seattle</option>
+                            <option value="PDX">PDX — Portland</option>
+                            <option value="BOI">BOI — Boise</option>
+                            <option value="RNO">RNO — Reno</option>
+                            <option value="SAC">SAC — Sacramento</option>
+                            <option value="SFO">SFO — San Francisco</option>
+                            <option value="SLC">SLC — Salt Lake City</option>
+                            <option value="LAS">LAS — Las Vegas</option>
+                            <option value="LAX">LAX — Los Angeles</option>
+                            <option value="PHX">PHX — Phoenix</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; justify-content:center; margin-bottom:6px;">
+                        <button class="swap-btn" id="swap-btn" title="Swap source and target">⇅</button>
+                    </div>
+                    <div class="route-row">
+                        <label>B</label>
+                        <select id="target-select">
+                            <option value="SEA">SEA — Seattle</option>
+                            <option value="PDX">PDX — Portland</option>
+                            <option value="BOI">BOI — Boise</option>
+                            <option value="RNO">RNO — Reno</option>
+                            <option value="SAC">SAC — Sacramento</option>
+                            <option value="SFO">SFO — San Francisco</option>
+                            <option value="SLC">SLC — Salt Lake City</option>
+                            <option value="LAS">LAS — Las Vegas</option>
+                            <option value="LAX">LAX — Los Angeles</option>
+                            <option value="PHX" selected>PHX — Phoenix</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" id="compute-btn">COMPUTE CORRIDOR</button>
+                </div>
+
+                <!-- Route Status -->
+                <div class="card">
+                    <div class="card-head">
+                        <span class="card-title">Optimal Corridor</span>
+                        <span class="card-icon">📡</span>
+                    </div>
+                    <div id="route-status-content">
+                        <p class="no-route">Loading crisis data…</p>
+                    </div>
+                </div>
+
+                <!-- Network Health -->
+                <div class="card">
+                    <div class="card-head">
+                        <span class="card-title">Network Resilience</span>
+                        <span class="card-icon">🛡️</span>
+                    </div>
+                    <div class="health-header">
+                        <span class="card-title" style="font-size:10px;">Uptime Score</span>
+                        <span class="health-score" id="health-score">—</span>
+                    </div>
+                    <div class="health-bar">
+                        <div class="health-bar-fill" id="health-bar-fill" style="width:0%"></div>
+                    </div>
+                    <div class="health-details" id="health-details"></div>
+                </div>
+
+                <!-- Earthquake Simulator -->
+                <div class="card">
+                    <div class="sim-header">
+                        <span class="card-title">⚡ Earthquake Simulator</span>
+                        <label class="toggle">
+                            <input type="checkbox" id="sim-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="sim-controls" id="sim-controls">
+                        <div class="sim-row">
+                            <label>Magnitude <span id="sim-mag-val">5.0</span></label>
+                            <input type="range" id="sim-mag" min="3" max="8" step="0.5" value="5">
+                        </div>
+                        <div class="sim-hint">Click anywhere on the map or select a disaster scenario:</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">
+                            <button type="button" class="btn btn-secondary sim-preset-btn" onclick="addSimQuake(39.52, -119.81, 6.5, 'Reno Bridge M6.5')" style="font-size:10px;padding:4px 6px;flex:1;min-width:45%;">💥 Reno M6.5</button>
+                            <button type="button" class="btn btn-secondary sim-preset-btn" onclick="addSimQuake(38.58, -121.49, 7.0, 'Sacramento M7.0')" style="font-size:10px;padding:4px 6px;flex:1;min-width:45%;">💥 Sac M7.0</button>
+                            <button type="button" class="btn btn-secondary sim-preset-btn" onclick="addSimQuake(40.76, -111.89, 6.2, 'Salt Lake M6.2')" style="font-size:10px;padding:4px 6px;flex:1;min-width:45%;">💥 SLC M6.2</button>
+                            <button type="button" class="btn btn-secondary sim-preset-btn" onclick="addSimQuake(47.60, -122.33, 7.2, 'Cascadia SEA M7.2')" style="font-size:10px;padding:4px 6px;flex:1;min-width:45%;">💥 Seattle M7.2</button>
+                        </div>
+                        <div class="sim-list" id="sim-list"></div>
+                        <button class="btn btn-secondary" id="sim-clear">Clear Simulated</button>
+                    </div>
+                </div>
+
+                <!-- Seismic Feed -->
+                <div class="card" style="flex:1; min-height:120px; display:flex; flex-direction:column;">
+                    <div class="card-head">
+                        <span class="card-title">Live Seismic Feed (M2.5+ / 24h)</span>
+                        <span class="card-icon">🌍</span>
+                    </div>
+                    <div class="quake-list" id="quake-list">
+                        <p class="feed-empty">Fetching USGS data…</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <label class="refresh-label">
+                    <label class="toggle">
+                        <input type="checkbox" id="refresh-toggle" checked>
+                        <span class="slider"></span>
+                    </label>
+                    Auto-refresh
+                </label>
+                <span id="last-update">—</span>
+            </div>
+        </div>
+
+        <!-- ═══ Map ═══ -->
+        <div id="map"></div>
+
+        <!-- ═══ Loading Overlay ═══ -->
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+    /* ═══════════════════════════════════════════════════════════
+       CrisisGrid — Frontend Controller
+       ═══════════════════════════════════════════════════════════ */
+
+    // ── State ──────────────────────────────────────────────────
+    let map;
+    const layers = {};
+    let simMode = false;
+    let simQuakes = [];
+    let refreshTimer = null;
+    const REFRESH_MS = 30000;
+
+    // ── Initialisation ─────────────────────────────────────────
+    function init() {
+        map = L.map('map', {
+            center: [40.0, -117.5],
+            zoom: 5,
+            zoomControl: false,
+            attributionControl: true,
+        });
+
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        // Base tile layers (100% Free, no API key, no watermark)
+        const darkCanvas = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; USGS, DeLorme, TomTom, OSM',
+            maxZoom: 16,
+        }).addTo(map);
+
+        const streetMap = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19,
+        });
+
+        L.control.layers({
+            "Dark Theme (Esri - No Key)": darkCanvas,
+            "Standard (OpenStreetMap)": streetMap,
+        }, null, { position: 'topright' }).addTo(map);
+
+        // Layer order matters: edges → quakes → alt routes → crisis route → nodes
+        layers.edges  = L.layerGroup().addTo(map);
+        layers.quakes = L.layerGroup().addTo(map);
+        layers.alts   = L.layerGroup().addTo(map);
+        layers.route  = L.layerGroup().addTo(map);
+        layers.nodes  = L.layerGroup().addTo(map);
+
+        // Legend control
+        addLegend();
+
+        // Event binding
+        document.getElementById('compute-btn').addEventListener('click', fetchAndRender);
+        document.getElementById('swap-btn').addEventListener('click', swapEndpoints);
+        document.getElementById('sim-toggle').addEventListener('change', toggleSim);
+        document.getElementById('sim-clear').addEventListener('click', clearSim);
+        document.getElementById('sim-mag').addEventListener('input', updateMagLabel);
+        document.getElementById('refresh-toggle').addEventListener('change', toggleRefresh);
+        map.on('click', onMapClick);
+
+        fetchAndRender();
+        startRefresh();
+    }
+
+    // ── Legend Control ─────────────────────────────────────────
+    function addLegend() {
+        const legend = L.control({ position: 'bottomright' });
+        legend.onAdd = function () {
+            const div = L.DomUtil.create('div', 'legend');
+            div.innerHTML = [
+                '<div class="legend-title">Legend</div>',
+                '<div class="legend-item"><span class="legend-dot" style="background:var(--cyan);border-color:#fff"></span> Hub (operational)</div>',
+                '<div class="legend-item"><span class="legend-dot" style="background:var(--purple);border-color:#fff"></span> Depot (operational)</div>',
+                '<div class="legend-item"><span class="legend-dot" style="background:var(--amber);border-color:#fff"></span> Bridge (operational)</div>',
+                '<div class="legend-item"><span class="legend-dot" style="background:var(--red);border-color:#fca5a5"></span> Damaged node</div>',
+                '<div class="legend-item"><span class="legend-swatch" style="background:var(--blue)"></span> Crisis route</div>',
+                '<div class="legend-item"><span class="legend-swatch" style="background:var(--amber);opacity:0.6"></span> Alternative route</div>',
+                '<div class="legend-item"><span class="legend-swatch" style="background:#4b5563"></span> Normal edge</div>',
+                '<div class="legend-item"><span class="legend-swatch" style="background:var(--orange)"></span> Penalized edge</div>',
+                '<div class="legend-item"><span class="legend-circle" style="border-color:var(--red)"></span> Impact zone</div>',
+            ].join('');
+            return div;
+        };
+        legend.addTo(map);
+    }
+
+    // ── Data Fetching ──────────────────────────────────────────
+    async function fetchAndRender() {
+        const src = document.getElementById('source-select').value;
+        const dst = document.getElementById('target-select').value;
+
+        if (src === dst) {
+            showError('Source and target must differ');
+            return;
+        }
+
+        setLoading(true);
+
+        try {
+            let data;
+            if (simQuakes.length > 0) {
+                const resp = await fetch('/api/crisis-routes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: src, target: dst, simulated: simQuakes }),
+                });
+                data = await resp.json();
+            } else {
+                const resp = await fetch('/api/crisis-routes?source=' + src + '&target=' + dst);
+                data = await resp.json();
+            }
+
+            if (data.error) { showError(data.error); return; }
+            render(data);
+        } catch (err) {
+            showError('Network error: ' + err.message);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    // ── Full Render ────────────────────────────────────────────
+    function render(data) {
+        clearAll();
+        renderEdges(data.edges);
+        renderEarthquakes(data.earthquakes);
+        if (data.alt_routes)   renderAltRoutes(data.alt_routes, data.nodes);
+        if (data.crisis_route) renderRoute(data.crisis_route, data.nodes);
+        renderNodes(data.nodes);
+        updateStatus(data);
+        updateHealth(data.resilience);
+        updateFeed(data.earthquakes);
+        document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+    }
+
+    function clearAll() {
+        Object.values(layers).forEach(function(l) { l.clearLayers(); });
+    }
+
+    // ── Render: Edges ──────────────────────────────────────────
+    function renderEdges(edges) {
+        edges.forEach(function(e) {
+            var color   = e.penalized ? '#f97316' : '#4b5563';
+            var opacity = e.penalized ? 0.5 : 0.25;
+            var dash    = e.penalized ? '8, 6' : null;
+            var line = L.polyline(e.coords, {
+                color: color, weight: 2, opacity: opacity, dashArray: dash,
+            });
+            line.bindTooltip(
+                e.from + ' ↔ ' + e.to + ': ' + e.weight + ' km' + (e.penalized ? ' ⚠ PENALIZED' : ''),
+            );
+            layers.edges.addLayer(line);
+        });
+    }
+
+    // ── Render: Earthquakes ────────────────────────────────────
+    function renderEarthquakes(quakes) {
+        quakes.forEach(function(q) {
+            // Impact zone circle
+            var circle = L.circle([q.lat, q.lon], {
+                radius: q.impact_radius * 1000,
+                color: '#ef4444', weight: 1.5, opacity: 0.35,
+                fillColor: '#ef4444', fillOpacity: 0.07,
+                dashArray: '6, 4',
+            });
+            var timeStr = q.time ? new Date(q.time).toLocaleString() : 'Simulated';
+            circle.bindPopup(
+                '<b>M' + q.mag.toFixed(1) + '</b> Earthquake<br>' +
+                '<small>' + (q.place || 'Simulated') + '</small><br>' +
+                'Depth: ' + q.depth + ' km<br>' +
+                'Impact radius: ' + q.impact_radius + ' km<br>' +
+                timeStr
+            );
+            layers.quakes.addLayer(circle);
+
+            // Epicenter dot
+            var dot = L.circleMarker([q.lat, q.lon], {
+                radius: Math.max(3, q.mag * 1.3),
+                color: '#ef4444', weight: 1,
+                fillColor: '#ff6b6b', fillOpacity: 0.85,
+            });
+            layers.quakes.addLayer(dot);
+        });
+    }
+
+    // ── Render: Crisis Route ───────────────────────────────────
+    function renderRoute(route, nodes) {
+        if (!route || !route.path) return;
+        var nodeMap = {};
+        nodes.forEach(function(n) { nodeMap[n.id] = n; });
+        var coords = route.path.map(function(id) { return [nodeMap[id].lat, nodeMap[id].lon]; });
+
+        // Glow layer
+        layers.route.addLayer(L.polyline(coords, {
+            color: '#1d4ed8', weight: 12, opacity: 0.35,
+            lineCap: 'round', lineJoin: 'round',
+        }));
+        // Main line
+        var main = L.polyline(coords, {
+            color: '#3b82f6', weight: 5, opacity: 0.95,
+            lineCap: 'round', lineJoin: 'round',
+        });
+        main.bindTooltip('Crisis Corridor: ' + route.cost + ' km', { sticky: true });
+        layers.route.addLayer(main);
+    }
+
+    // ── Render: Alternative Routes ─────────────────────────────
+    function renderAltRoutes(routes, nodes) {
+        var nodeMap = {};
+        nodes.forEach(function(n) { nodeMap[n.id] = n; });
+
+        routes.forEach(function(r, i) {
+            var coords = r.path.map(function(id) { return [nodeMap[id].lat, nodeMap[id].lon]; });
+            var line = L.polyline(coords, {
+                color: '#f59e0b', weight: 3, opacity: 0.4,
+                dashArray: '10, 8', lineCap: 'round', lineJoin: 'round',
+            });
+            line.bindTooltip('Alt #' + (i + 1) + ': ' + r.cost + ' km', { sticky: true });
+            layers.alts.addLayer(line);
+        });
+    }
+
+    // ── Render: Nodes ──────────────────────────────────────────
+    function renderNodes(nodes) {
+        var typeColors = { hub: '#06d6e0', depot: '#8b5cf6', bridge: '#f59e0b' };
+
+        nodes.forEach(function(node) {
+            var damaged = node.status === 'damaged';
+            var bg = damaged ? '#ef4444' : (typeColors[node.type] || '#22c55e');
+            var bc = damaged ? '#fca5a5' : '#ffffff';
+
+            var html =
+                '<div class="node-marker">' +
+                    (damaged ? '<div class="pulse-ring"></div>' : '') +
+                    '<div class="pin-dot" style="background:' + bg + ';border-color:' + bc + '"></div>' +
+                    '<div class="pin-label">' + node.id + '</div>' +
+                '</div>';
+
+            var icon = L.divIcon({
+                className: '',
+                html: html,
+                iconSize: [60, 45],
+                iconAnchor: [30, 18],
+            });
+
+            var marker = L.marker([node.lat, node.lon], { icon: icon });
+
+            var popup = '<b>' + node.name + '</b><br>' +
+                'Type: ' + node.type.toUpperCase() +
+                ' &nbsp;|&nbsp; Status: <span style="color:' + (damaged ? '#ef4444' : '#22c55e') + '">' +
+                node.status.toUpperCase() + '</span>';
+
+            if (node.hits) {
+                popup += '<hr><b>Affected by:</b><ul>';
+                node.hits.forEach(function(h) {
+                    popup += '<li>M' + h.mag + ' at ' + h.dist_km + ' km (radius: ' + h.radius + ' km)</li>';
+                });
+                popup += '</ul>';
+            }
+
+            marker.bindPopup(popup);
+            layers.nodes.addLayer(marker);
+        });
+    }
+
+    // ── UI: Route Status ───────────────────────────────────────
+    function updateStatus(data) {
+        var el = document.getElementById('route-status-content');
+        if (!data.crisis_route) {
+            el.innerHTML = '<p class="no-route">No survivable corridor found</p>';
+            return;
+        }
+        var cr = data.crisis_route;
+        var nr = data.normal_route;
+
+        // Path flow
+        var pathHtml = cr.path.map(function(id) {
+            var nd = data.nodes.find(function(n) { return n.id === id; });
+            var cls = (nd && nd.status === 'damaged') ? 'path-node damaged' : 'path-node';
+            return '<span class="' + cls + '">' + id + '</span>';
+        }).join('<span class="path-arrow"> → </span>');
+
+        // Cost comparison
+        var compHtml = '';
+        if (nr) {
+            var inc = ((cr.cost - nr.cost) / nr.cost * 100).toFixed(1);
+            var incColor = inc > 0 ? '#ef4444' : '#22c55e';
+            compHtml =
+                '<div class="stat-row"><span class="stat-label">Normal Cost</span><span class="stat-value">' + nr.cost + ' km</span></div>' +
+                '<div class="stat-row"><span class="stat-label">Detour Penalty</span><span class="stat-value" style="color:' + incColor + '">' + (inc > 0 ? '+' : '') + inc + '%</span></div>';
+        }
+
+        var penSegs = cr.segments.filter(function(s) { return s.penalized; }).length;
+
+        el.innerHTML =
+            '<div class="path-flow">' + pathHtml + '</div>' +
+            '<div class="route-stats">' +
+                '<div class="stat-row"><span class="stat-label">Crisis Cost</span><span class="stat-value accent">' + cr.cost + ' km</span></div>' +
+                compHtml +
+                '<div class="stat-row"><span class="stat-label">Hops</span><span class="stat-value">' + cr.hops + '</span></div>' +
+                '<div class="stat-row"><span class="stat-label">Penalized Segments</span><span class="stat-value" style="color:' + (penSegs > 0 ? '#f97316' : '#22c55e') + '">' + penSegs + '</span></div>' +
+            '</div>';
+
+        // Alternative routes
+        if (data.alt_routes && data.alt_routes.length > 0) {
+            var altHtml = '<div class="alt-routes-section"><h4>Alternative Corridors</h4>';
+            data.alt_routes.forEach(function(ar) {
+                altHtml +=
+                    '<div class="alt-route">' +
+                        '<span class="alt-path">' + ar.path.join(' → ') + '</span>' +
+                        '<span class="alt-cost">' + ar.cost + ' km</span>' +
+                    '</div>';
+            });
+            el.innerHTML += altHtml + '</div>';
+        }
+    }
+
+    // ── UI: Network Health ─────────────────────────────────────
+    function updateHealth(res) {
+        var fill  = document.getElementById('health-bar-fill');
+        var score = document.getElementById('health-score');
+        var det   = document.getElementById('health-details');
+
+        fill.style.width = res.score + '%';
+        fill.style.background = res.score > 70 ? '#22c55e' : res.score > 40 ? '#f59e0b' : '#ef4444';
+        score.textContent = res.score + '%';
+        score.style.color = res.score > 70 ? '#22c55e' : res.score > 40 ? '#f59e0b' : '#ef4444';
+
+        det.innerHTML =
+            '<span class="health-stat"><span class="dot green"></span> ' + res.ok + ' operational</span>' +
+            '<span class="health-stat"><span class="dot red"></span> ' + res.damaged + ' damaged</span>' +
+            (res.damaged_ids.length > 0 ? '<span class="damaged-list">⚠ ' + res.damaged_ids.join(', ') + '</span>' : '');
+    }
+
+    // ── UI: Earthquake Feed ────────────────────────────────────
+    function updateFeed(quakes) {
+        var el = document.getElementById('quake-list');
+        if (!quakes || quakes.length === 0) {
+            el.innerHTML = '<p class="feed-empty">No M2.5+ seismic events in the last 24 hours</p>';
+            return;
+        }
+
+        var sorted = quakes.slice().sort(function(a, b) { return b.mag - a.mag; });
+        var top = sorted.slice(0, 20);
+
+        el.innerHTML = top.map(function(q) {
+            var cls = q.mag >= 5 ? 'high' : q.mag >= 4 ? 'medium' : 'low';
+            var t = q.time ? timeAgo(q.time) : 'SIM';
+            return '<div class="quake-item" onclick="map.setView([' + q.lat + ',' + q.lon + '],7)">' +
+                '<span class="quake-mag ' + cls + '">M' + q.mag.toFixed(1) + '</span>' +
+                '<span class="quake-info">' +
+                    '<span class="quake-place">' + (q.place || 'Simulated') + '</span>' +
+                    '<span class="quake-time">' + t + '</span>' +
+                '</span></div>';
+        }).join('');
+    }
+
+    function timeAgo(ms) {
+        var s = Math.floor((Date.now() - ms) / 1000);
+        if (s < 0) return 'just now';
+        if (s < 60) return s + 's ago';
+        if (s < 3600) return Math.floor(s / 60) + 'm ago';
+        if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+        return Math.floor(s / 86400) + 'd ago';
+    }
+
+    // ── Simulation ─────────────────────────────────────────────
+    function toggleSim() {
+        simMode = this.checked;
+        var ctrl = document.getElementById('sim-controls');
+        ctrl.classList.toggle('active', simMode);
+        map.getContainer().style.cursor = simMode ? 'crosshair' : '';
+        var overlay = map.getPanes().overlayPane;
+        if (overlay) overlay.style.pointerEvents = simMode ? 'none' : 'auto';
+    }
+
+    function addSimQuake(lat, lon, mag, label) {
+        simQuakes.push({ lat: lat, lon: lon, mag: mag, label: label });
+        updateSimList();
+        fetchAndRender();
+    }
+
+    function onMapClick(e) {
+        if (!simMode) return;
+        var mag = parseFloat(document.getElementById('sim-mag').value);
+        simQuakes.push({ lat: e.latlng.lat, lon: e.latlng.lng, mag: mag });
+        updateSimList();
+        fetchAndRender();
+    }
+
+    function updateSimList() {
+        var el = document.getElementById('sim-list');
+        el.innerHTML = simQuakes.map(function(q, i) {
+            var label = q.label ? ('<span style="font-size:10px;color:var(--text-muted);margin-left:4px;">' + q.label + '</span>') : '';
+            return '<div class="sim-item">' +
+                '<span class="quake-mag medium">M' + q.mag.toFixed(1) + '</span>' +
+                '<span style="font-size:11px;color:var(--text-sec)">' + q.lat.toFixed(2) + ', ' + q.lon.toFixed(2) + label + '</span>' +
+                '<button class="remove-sim" onclick="removeSim(' + i + ')">✕</button></div>';
+        }).join('');
+    }
+
+    function removeSim(i) {
+        simQuakes.splice(i, 1);
+        updateSimList();
+        fetchAndRender();
+    }
+
+    function clearSim() {
+        simQuakes = [];
+        updateSimList();
+        fetchAndRender();
+    }
+
+    function updateMagLabel() {
+        document.getElementById('sim-mag-val').textContent = this.value;
+    }
+
+    // ── Swap Endpoints ─────────────────────────────────────────
+    function swapEndpoints() {
+        var s = document.getElementById('source-select');
+        var t = document.getElementById('target-select');
+        var tmp = s.value;
+        s.value = t.value;
+        t.value = tmp;
+        fetchAndRender();
+    }
+
+    // ── Auto-refresh ───────────────────────────────────────────
+    function toggleRefresh() {
+        if (this.checked) { startRefresh(); }
+        else { stopRefresh(); }
+    }
+
+    function startRefresh() {
+        stopRefresh();
+        refreshTimer = setInterval(fetchAndRender, REFRESH_MS);
+    }
+
+    function stopRefresh() {
+        if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    }
+
+    // ── Loading / Errors ───────────────────────────────────────
+    function setLoading(on) {
+        document.getElementById('loading').style.display = on ? 'flex' : 'none';
+    }
+
+    function showError(msg) {
+        document.getElementById('route-status-content').innerHTML =
+            '<p class="error-msg">⚠ ' + msg + '</p>';
+    }
+
+    // ── Boot ───────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
